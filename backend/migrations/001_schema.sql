@@ -1,3 +1,10 @@
--- New MySQL baseline: SQLAlchemy metadata creates datasets, instruments, studies, runs, reviews, reports, users, audits.
--- Study variance_ratio and tolerance explicitly use DOUBLE.
+-- New MySQL baseline: SQLAlchemy metadata creates datasets, instruments, studies, runs,
+-- reviews, reports, users, audits plus the sampling-stream pairing feature:
+--   acquisition_batches (uq: code+side), samples (uq: batch_id+side+sample_no+revision),
+--   pairing_previews (uq: batch_code), pairing_batches (uq: preview_id, uq: name).
+-- Study variance_ratio and tolerance explicitly use DOUBLE; sample.reading uses DOUBLE.
 -- Existing deployments require reviewed migrations; automatic destructive upgrades are not provided.
+--
+-- 采样流水配对要点：
+--   samples 同编号同修订唯一并保存 content_hash，is_current 标记当前修订，旧修订晚到只存档不覆盖；
+--   pairing_batches 为发布后不可变快照，preview_id 唯一约束保证同一预览并发发布只生成一份。

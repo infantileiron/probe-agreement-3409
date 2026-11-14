@@ -55,6 +55,24 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 CSV列 `pair_id,range_label,x,y`，量程为low/middle/high，每批最多5000组；配对ID必填、唯一，x/y必须有限且绝对值≤1e9，缺失值、NaN/Infinity和未知量程拒绝。最少4组才能计算。单位由批次两侧声明及探头组合共同校验，只接受kPa/bar/degC/mg/L；不同单位不自动换算。用户仍需保证真实采集对象、时刻和测量条件一致。
 
+## 采样流水分侧接收与自动配对
+
+两探头各自导出采样流水，在“配对观测”页按**采集批次号 + 探头侧别（x/y）**分侧接收。流水列为 `sample_no,sampled_at,range_label,reading,revision`，即采样编号、ISO 8601采样时间、量程、读数与修订号；同时支持 JSON `samples` 与 CSV 文本入口，单次最多5000条，单侧当前样本上限2000。
+
+接收与修订规则（均以 `batch+side+sample_no+revision` 唯一、并对完整内容做 SHA-256 摘要）：
+
+- **幂等接收**：重复执行同一上传，编号+修订已存在且内容一致时跳过，不新增样本。
+- **乱序补传**：样本可任意先后到达，按编号归档，不依赖上传顺序。
+- **修订裁决**：同编号以更大修订号为当前值；**旧修订晚到只存档（is_current=false），不覆盖新值**。
+- **整批拒绝**：同编号同修订但内容（时间/量程/读数/修订）与已存样本冲突时，整批回滚、不写入任何样本，返回冲突明细。
+- 已发布采集批次拒绝再补传，补传需另建采集批次。
+
+配对在预览时按**量程相同 + 绝对时差 ≤ 可设 `max_time_diff`（秒，0–86400）**生成，采样只用一次。求解按固定优先级：**先求配对数量最多，再求总绝对时差最小，仍并列时按 X 编号（再按 Y 编号）字典序固定裁决**，结果与上传顺序无关。底层为源点→X→Y→汇点的最小费用最大流（SPFA 初始化势能 + Dijkstra 增广），容量1保证不重用；候选边按量程分组、时间二分定位。未配对样本给出确定原因：`no_candidate`（同量程时差窗内无任何候选）或 `grabbed`（窗内候选均已被其他样本占用，即抢配）。
+
+发布生成**不可变配对批次**（`pairing_batches` 快照，`preview_id` 唯一）：同时落一份既有 `datasets` 形态供下游研究/运行/复核链路使用，至少4组配对才可发布。发布后冻结快照与关联研究，**后续补传修订不改变已发布批次**；对同一预览的并发或重复发布只生成一份（InnoDB 行锁串行化 + 唯一约束兜底，重复请求返回同一份并标记 idempotent）。
+
+接口前缀 `/api/acquisition`：`POST /ingest` 分侧接收、`GET /batches`（按批次聚合）、`GET /batches/{code}`、`POST/GET /batches/{code}/preview`、`POST /batches/{code}/publish`、`GET /pairings` 与 `/pairings/{id}`。写入需 analyst/admin，viewer 只读。
+
 Deming模型为 `y=intercept+slope*x`，**λ=var(y测量误差)/var(x测量误差)**，由外部重复测量或计量依据输入，不从本批读数方差自动估计。设Sxx/Syy/Sxy为样本中心二阶矩，Δ=Syy−λSxx，斜率为：
 
 `(Δ + sqrt(Δ² + 4λSxy²)) / (2Sxy)`

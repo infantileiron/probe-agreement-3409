@@ -6,3 +6,4 @@ from .review import BiasReview
 from .report import Report
 from .user import User
 from .audit import Audit
+from .acquisition import AcquisitionBatch, Sample, PairingPreview, PairingBatch
